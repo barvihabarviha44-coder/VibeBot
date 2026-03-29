@@ -1,9 +1,9 @@
 import asyncpg
-import asyncio
-from config import DATABASE_URL
 from datetime import datetime, timedelta
 import json
 import random
+
+from config import DATABASE_URL
 
 
 class Database:
@@ -11,12 +11,18 @@ class Database:
         self.pool = None
     
     async def connect(self):
-        self.pool = await asyncpg.create_pool(DATABASE_URL, min_size=5, max_size=20)
+        self.pool = await asyncpg.create_pool(
+            DATABASE_URL, 
+            min_size=2, 
+            max_size=10,
+            command_timeout=60
+        )
         await self.create_tables()
     
     async def create_tables(self):
         async with self.pool.acquire() as conn:
-            # Пользователи
+            # ========== 1. ОСНОВНЫЕ ТАБЛИЦЫ (без зависимостей) ==========
+            
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
@@ -33,124 +39,124 @@ class Database:
                     games_won INT DEFAULT 0,
                     registered_at TIMESTAMP DEFAULT NOW(),
                     last_activity TIMESTAMP DEFAULT NOW(),
+                    last_work TIMESTAMP DEFAULT NULL,
                     is_banned BOOLEAN DEFAULT FALSE,
                     is_subscribed BOOLEAN DEFAULT FALSE,
                     jackpot_registered BOOLEAN DEFAULT FALSE,
-                    president_bet BIGINT DEFAULT 0,
                     is_president BOOLEAN DEFAULT FALSE,
-                    business_slots INT DEFAULT 1,
-                    last_work TIMESTAMP DEFAULT NULL
+                    business_slots INT DEFAULT 1
                 )
             ''')
             
-            # Видеокарты пользователей
             await conn.execute('''
-                CREATE TABLE IF NOT EXISTS user_gpus (
+                CREATE TABLE IF NOT EXISTS businesses (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    gpu_type TEXT,
-                    count INT DEFAULT 0,
-                    current_price BIGINT,
-                    last_collect TIMESTAMP DEFAULT NOW(),
-                    UNIQUE(user_id, gpu_type)
+                    name TEXT NOT NULL,
+                    base_price BIGINT NOT NULL,
+                    base_profit BIGINT NOT NULL,
+                    emoji TEXT DEFAULT '🏢'
                 )
             ''')
             
-            # Рынок VibeTon
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS market_orders (
-                    id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    order_type TEXT,
-                    amount DECIMAL(20,4),
-                    price BIGINT,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    is_active BOOLEAN DEFAULT TRUE
-                )
-            ''')
-            
-            # Текущая цена VT
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS vt_price (
-                    id SERIAL PRIMARY KEY,
-                    price BIGINT,
-                    updated_at TIMESTAMP DEFAULT NOW()
-                )
-            ''')
-            
-            # Промокоды
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS promocodes (
                     id SERIAL PRIMARY KEY,
-                    code TEXT UNIQUE,
-                    reward_type TEXT,
-                    reward_amount BIGINT,
-                    max_uses INT,
+                    code TEXT UNIQUE NOT NULL,
+                    reward_type TEXT NOT NULL,
+                    reward_amount BIGINT NOT NULL,
+                    max_uses INT NOT NULL,
                     current_uses INT DEFAULT 0,
                     expires_at TIMESTAMP,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
             ''')
             
-            # Использованные промокоды
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS used_promocodes (
-                    id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    promocode_id INT REFERENCES promocodes(id) ON DELETE CASCADE,
-                    used_at TIMESTAMP DEFAULT NOW(),
-                    UNIQUE(user_id, promocode_id)
-                )
-            ''')
-            
-            # Джекпот
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS jackpot (
-                    id SERIAL PRIMARY KEY,
-                    amount BIGINT DEFAULT 0,
+                    id INT PRIMARY KEY DEFAULT 1,
+                    amount BIGINT DEFAULT 1000000,
                     last_winner BIGINT,
                     last_draw TIMESTAMP
                 )
             ''')
             
-            # Президент
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS president (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT,
+                    user_id BIGINT NOT NULL,
                     profit BIGINT DEFAULT 0,
                     elected_at TIMESTAMP DEFAULT NOW()
                 )
             ''')
             
-            # Ставки на президента
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS vt_price (
+                    id SERIAL PRIMARY KEY,
+                    price BIGINT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+            
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS daily_bonus (
+                    id SERIAL PRIMARY KEY,
+                    bonus_amount BIGINT NOT NULL,
+                    max_activations INT NOT NULL,
+                    current_activations INT DEFAULT 0,
+                    bonus_date DATE DEFAULT CURRENT_DATE
+                )
+            ''')
+            
+            # ========== 2. ТАБЛИЦЫ С ЗАВИСИМОСТЯМИ ==========
+            
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS user_gpus (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    gpu_type TEXT NOT NULL,
+                    count INT DEFAULT 0,
+                    current_price BIGINT NOT NULL,
+                    last_collect TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(user_id, gpu_type)
+                )
+            ''')
+            
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS market_orders (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    order_type TEXT NOT NULL,
+                    amount DECIMAL(20,4) NOT NULL,
+                    price BIGINT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    is_active BOOLEAN DEFAULT TRUE
+                )
+            ''')
+            
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS used_promocodes (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    promocode_id INT NOT NULL REFERENCES promocodes(id) ON DELETE CASCADE,
+                    used_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(user_id, promocode_id)
+                )
+            ''')
+            
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS president_bets (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    bet_amount BIGINT,
-                    bet_date DATE DEFAULT CURRENT_DATE,
-                    UNIQUE(user_id, bet_date)
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    bet_amount BIGINT NOT NULL,
+                    bet_date DATE DEFAULT CURRENT_DATE
                 )
             ''')
             
-            # Бизнесы
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS businesses (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT,
-                    base_price BIGINT,
-                    base_profit BIGINT,
-                    emoji TEXT DEFAULT '🏢'
-                )
-            ''')
-            
-            # Бизнесы пользователей
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS user_businesses (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    business_id INT REFERENCES businesses(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    business_id INT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
                     upgrade_level INT DEFAULT 1,
                     profit_multiplier DECIMAL(5,2) DEFAULT 1.0,
                     last_collect TIMESTAMP DEFAULT NOW(),
@@ -159,96 +165,87 @@ class Database:
                 )
             ''')
             
-            # Задания
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS daily_tasks (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    task_type TEXT,
-                    task_target INT,
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    task_type TEXT NOT NULL,
+                    task_target INT NOT NULL,
                     task_progress INT DEFAULT 0,
-                    reward_vc BIGINT,
-                    reward_vt DECIMAL(10,2),
+                    reward_vc BIGINT NOT NULL,
+                    reward_vt DECIMAL(10,2) NOT NULL,
                     task_date DATE DEFAULT CURRENT_DATE,
                     is_completed BOOLEAN DEFAULT FALSE
                 )
             ''')
             
-            # Активные игры
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS active_games (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    game_type TEXT,
-                    bet_amount BIGINT,
-                    game_data JSONB,
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    game_type TEXT NOT NULL,
+                    bet_amount BIGINT NOT NULL,
+                    game_data JSONB NOT NULL DEFAULT '{}',
                     started_at TIMESTAMP DEFAULT NOW(),
                     UNIQUE(user_id, game_type)
                 )
             ''')
             
-            # История игр
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS game_history (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    game_type TEXT,
-                    bet_amount BIGINT,
-                    win_amount BIGINT,
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    game_type TEXT NOT NULL,
+                    bet_amount BIGINT NOT NULL,
+                    win_amount BIGINT DEFAULT 0,
                     result TEXT,
                     played_at TIMESTAMP DEFAULT NOW()
                 )
             ''')
             
-            # Переводы
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS transfers (
                     id SERIAL PRIMARY KEY,
-                    from_user BIGINT,
-                    to_user BIGINT,
-                    amount BIGINT,
-                    currency TEXT,
-                    commission BIGINT,
+                    from_user BIGINT NOT NULL,
+                    to_user BIGINT NOT NULL,
+                    amount BIGINT NOT NULL,
+                    currency TEXT NOT NULL,
+                    commission BIGINT DEFAULT 0,
                     transferred_at TIMESTAMP DEFAULT NOW()
-                )
-            ''')
-            
-            # Бонусы в группе
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS daily_bonus (
-                    id SERIAL PRIMARY KEY,
-                    bonus_amount BIGINT,
-                    max_activations INT,
-                    current_activations INT DEFAULT 0,
-                    bonus_date DATE DEFAULT CURRENT_DATE
                 )
             ''')
             
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS bonus_claims (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-                    bonus_id INT REFERENCES daily_bonus(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    bonus_id INT NOT NULL REFERENCES daily_bonus(id) ON DELETE CASCADE,
                     claimed_at TIMESTAMP DEFAULT NOW(),
                     UNIQUE(user_id, bonus_id)
                 )
             ''')
             
-            # Инициализация джекпота
+            # ========== 3. ИНИЦИАЛИЗАЦИЯ ДАННЫХ ==========
+            
             jackpot = await conn.fetchrow('SELECT * FROM jackpot WHERE id = 1')
             if not jackpot:
                 await conn.execute('INSERT INTO jackpot (id, amount) VALUES (1, 1000000)')
             
-            # Инициализация цены VT
             vt_price = await conn.fetchrow('SELECT * FROM vt_price ORDER BY id DESC LIMIT 1')
             if not vt_price:
-                await conn.execute('INSERT INTO vt_price (price) VALUES ($1)', random.randint(1000, 15000))
+                await conn.execute(
+                    'INSERT INTO vt_price (price) VALUES ($1)', 
+                    random.randint(1000, 15000)
+                )
     
     # ==================== USERS ====================
     
     async def get_user(self, user_id: int):
         async with self.pool.acquire() as conn:
-            return await conn.fetchrow('SELECT * FROM users WHERE user_id = $1', user_id)
+            return await conn.fetchrow(
+                'SELECT * FROM users WHERE user_id = $1', 
+                user_id
+            )
     
     async def create_user(self, user_id: int, username: str, first_name: str):
         async with self.pool.acquire() as conn:
@@ -259,37 +256,66 @@ class Database:
                     username = EXCLUDED.username,
                     first_name = EXCLUDED.first_name,
                     last_activity = NOW()
-            ''', user_id, username, first_name)
+            ''', user_id, username or '', first_name or 'Игрок')
     
     async def update_balance(self, user_id: int, amount: int, add: bool = True):
         async with self.pool.acquire() as conn:
             if add:
-                await conn.execute('UPDATE users SET balance = balance + $1 WHERE user_id = $2', amount, user_id)
+                await conn.execute(
+                    'UPDATE users SET balance = balance + $1 WHERE user_id = $2', 
+                    amount, user_id
+                )
             else:
-                await conn.execute('UPDATE users SET balance = balance - $1 WHERE user_id = $2', amount, user_id)
+                await conn.execute(
+                    'UPDATE users SET balance = GREATEST(balance - $1, 0) WHERE user_id = $2', 
+                    amount, user_id
+                )
     
     async def update_vt_balance(self, user_id: int, amount: float, add: bool = True):
         async with self.pool.acquire() as conn:
             if add:
-                await conn.execute('UPDATE users SET vt_balance = vt_balance + $1 WHERE user_id = $2', amount, user_id)
+                await conn.execute(
+                    'UPDATE users SET vt_balance = vt_balance + $1 WHERE user_id = $2', 
+                    amount, user_id
+                )
             else:
-                await conn.execute('UPDATE users SET vt_balance = vt_balance - $1 WHERE user_id = $2', amount, user_id)
+                await conn.execute(
+                    'UPDATE users SET vt_balance = GREATEST(vt_balance - $1, 0) WHERE user_id = $2', 
+                    amount, user_id
+                )
     
     async def update_bank(self, user_id: int, amount: int, add: bool = True):
         async with self.pool.acquire() as conn:
             if add:
-                await conn.execute('UPDATE users SET bank_balance = bank_balance + $1 WHERE user_id = $2', amount, user_id)
+                await conn.execute(
+                    'UPDATE users SET bank_balance = bank_balance + $1 WHERE user_id = $2', 
+                    amount, user_id
+                )
             else:
-                await conn.execute('UPDATE users SET bank_balance = bank_balance - $1 WHERE user_id = $2', amount, user_id)
+                await conn.execute(
+                    'UPDATE users SET bank_balance = GREATEST(bank_balance - $1, 0) WHERE user_id = $2', 
+                    amount, user_id
+                )
     
     async def add_xp(self, user_id: int, amount: int):
         from config import get_level_from_xp
         async with self.pool.acquire() as conn:
-            await conn.execute('UPDATE users SET xp = xp + $1 WHERE user_id = $2', amount, user_id)
-            user = await conn.fetchrow('SELECT xp, level FROM users WHERE user_id = $1', user_id)
+            await conn.execute(
+                'UPDATE users SET xp = xp + $1 WHERE user_id = $2', 
+                amount, user_id
+            )
+            user = await conn.fetchrow(
+                'SELECT xp, level FROM users WHERE user_id = $1', 
+                user_id
+            )
+            if not user:
+                return None
             new_level = get_level_from_xp(user['xp'])
             if new_level > user['level']:
-                await conn.execute('UPDATE users SET level = $1 WHERE user_id = $2', new_level, user_id)
+                await conn.execute(
+                    'UPDATE users SET level = $1 WHERE user_id = $2', 
+                    new_level, user_id
+                )
                 return new_level
             return None
     
@@ -307,19 +333,31 @@ class Database:
     
     async def set_subscribed(self, user_id: int, status: bool = True):
         async with self.pool.acquire() as conn:
-            await conn.execute('UPDATE users SET is_subscribed = $1 WHERE user_id = $2', status, user_id)
+            await conn.execute(
+                'UPDATE users SET is_subscribed = $1 WHERE user_id = $2', 
+                status, user_id
+            )
     
     async def ban_user(self, user_id: int, ban: bool = True):
         async with self.pool.acquire() as conn:
-            await conn.execute('UPDATE users SET is_banned = $1 WHERE user_id = $2', ban, user_id)
+            await conn.execute(
+                'UPDATE users SET is_banned = $1 WHERE user_id = $2', 
+                ban, user_id
+            )
     
     async def get_top_by_balance(self, limit: int = 10):
         async with self.pool.acquire() as conn:
-            return await conn.fetch('SELECT * FROM users WHERE is_banned = FALSE ORDER BY balance DESC LIMIT $1', limit)
+            return await conn.fetch(
+                'SELECT * FROM users WHERE is_banned = FALSE ORDER BY balance DESC LIMIT $1', 
+                limit
+            )
     
     async def get_top_by_vt(self, limit: int = 10):
         async with self.pool.acquire() as conn:
-            return await conn.fetch('SELECT * FROM users WHERE is_banned = FALSE ORDER BY vt_balance DESC LIMIT $1', limit)
+            return await conn.fetch(
+                'SELECT * FROM users WHERE is_banned = FALSE ORDER BY vt_balance DESC LIMIT $1', 
+                limit
+            )
     
     async def get_all_users_count(self):
         async with self.pool.acquire() as conn:
@@ -334,13 +372,20 @@ class Database:
     
     async def update_last_work(self, user_id: int):
         async with self.pool.acquire() as conn:
-            await conn.execute('UPDATE users SET last_work = NOW() WHERE user_id = $1', user_id)
+            await conn.execute(
+                'UPDATE users SET last_work = NOW() WHERE user_id = $1', 
+                user_id
+            )
     
     async def get_user_position_in_top(self, user_id: int, by_field: str = 'balance') -> int:
         async with self.pool.acquire() as conn:
+            if by_field not in ('balance', 'vt_balance', 'xp', 'games_won'):
+                by_field = 'balance'
             result = await conn.fetchval(f'''
                 SELECT COUNT(*) + 1 FROM users 
-                WHERE {by_field} > (SELECT {by_field} FROM users WHERE user_id = $1)
+                WHERE {by_field} > (
+                    SELECT COALESCE({by_field}, 0) FROM users WHERE user_id = $1
+                )
                 AND is_banned = FALSE
             ''', user_id)
             return result or 1
@@ -349,7 +394,10 @@ class Database:
     
     async def get_user_gpus(self, user_id: int):
         async with self.pool.acquire() as conn:
-            return await conn.fetch('SELECT * FROM user_gpus WHERE user_id = $1', user_id)
+            return await conn.fetch(
+                'SELECT * FROM user_gpus WHERE user_id = $1', 
+                user_id
+            )
     
     async def get_user_gpu(self, user_id: int, gpu_type: str):
         async with self.pool.acquire() as conn:
@@ -360,11 +408,11 @@ class Database:
     
     async def buy_gpu(self, user_id: int, gpu_type: str, price: int):
         async with self.pool.acquire() as conn:
+            new_price = int(price * 1.2)
             existing = await conn.fetchrow(
                 'SELECT * FROM user_gpus WHERE user_id = $1 AND gpu_type = $2', 
                 user_id, gpu_type
             )
-            new_price = int(price * 1.2)
             if existing:
                 await conn.execute('''
                     UPDATE user_gpus SET count = count + 1, current_price = $1
@@ -379,7 +427,10 @@ class Database:
     async def collect_vt(self, user_id: int):
         from config import GPU_CONFIG
         async with self.pool.acquire() as conn:
-            gpus = await conn.fetch('SELECT * FROM user_gpus WHERE user_id = $1', user_id)
+            gpus = await conn.fetch(
+                'SELECT * FROM user_gpus WHERE user_id = $1', 
+                user_id
+            )
             total_vt = 0.0
             
             for gpu in gpus:
@@ -400,29 +451,35 @@ class Database:
     async def get_pending_vt(self, user_id: int) -> float:
         from config import GPU_CONFIG
         async with self.pool.acquire() as conn:
-            gpus = await conn.fetch('SELECT * FROM user_gpus WHERE user_id = $1', user_id)
+            gpus = await conn.fetch(
+                'SELECT * FROM user_gpus WHERE user_id = $1', 
+                user_id
+            )
             total_vt = 0.0
-            
             for gpu in gpus:
                 config = GPU_CONFIG.get(gpu['gpu_type'])
                 if config and gpu['count'] > 0:
                     hours = (datetime.now() - gpu['last_collect']).total_seconds() / 3600
                     vt = hours * config['vt_per_hour'] * gpu['count']
                     total_vt += vt
-            
             return total_vt
     
     # ==================== MARKET ====================
     
     async def get_vt_price(self):
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow('SELECT * FROM vt_price ORDER BY updated_at DESC LIMIT 1')
+            row = await conn.fetchrow(
+                'SELECT price FROM vt_price ORDER BY updated_at DESC LIMIT 1'
+            )
             return row['price'] if row else 5000
     
     async def update_vt_price(self):
         async with self.pool.acquire() as conn:
             new_price = random.randint(1000, 15000)
-            await conn.execute('INSERT INTO vt_price (price) VALUES ($1)', new_price)
+            await conn.execute(
+                'INSERT INTO vt_price (price) VALUES ($1)', 
+                new_price
+            )
             return new_price
     
     async def create_market_order(self, user_id: int, order_type: str, amount: float, price: int):
@@ -444,7 +501,9 @@ class Database:
                     'SELECT * FROM market_orders WHERE order_type = $1 AND is_active = TRUE ORDER BY price',
                     order_type
                 )
-            return await conn.fetch('SELECT * FROM market_orders WHERE is_active = TRUE ORDER BY created_at DESC')
+            return await conn.fetch(
+                'SELECT * FROM market_orders WHERE is_active = TRUE ORDER BY created_at DESC LIMIT 20'
+            )
     
     async def cancel_order(self, order_id: int, user_id: int):
         async with self.pool.acquire() as conn:
@@ -457,7 +516,6 @@ class Database:
                     'UPDATE market_orders SET is_active = FALSE WHERE id = $1',
                     order_id
                 )
-                # Возвращаем средства
                 if order['order_type'] == 'buy':
                     total = int(order['price'] * float(order['amount']))
                     await self.update_balance(user_id, total, add=True)
@@ -468,9 +526,15 @@ class Database:
     
     async def execute_order(self, order_id: int, buyer_id: int):
         async with self.pool.acquire() as conn:
-            order = await conn.fetchrow('SELECT * FROM market_orders WHERE id = $1 AND is_active = TRUE', order_id)
+            order = await conn.fetchrow(
+                'SELECT * FROM market_orders WHERE id = $1 AND is_active = TRUE', 
+                order_id
+            )
             if order:
-                await conn.execute('UPDATE market_orders SET is_active = FALSE WHERE id = $1', order_id)
+                await conn.execute(
+                    'UPDATE market_orders SET is_active = FALSE WHERE id = $1', 
+                    order_id
+                )
                 return order
             return None
     
@@ -491,19 +555,22 @@ class Database:
     
     async def use_promocode(self, user_id: int, code: str):
         async with self.pool.acquire() as conn:
-            promo = await conn.fetchrow(
-                'SELECT * FROM promocodes WHERE UPPER(code) = UPPER($1) AND expires_at > NOW() AND current_uses < max_uses',
-                code
-            )
+            promo = await conn.fetchrow('''
+                SELECT * FROM promocodes 
+                WHERE UPPER(code) = UPPER($1) 
+                AND expires_at > NOW() 
+                AND current_uses < max_uses
+            ''', code)
+            
             if not promo:
-                return None, "Промокод не найден или истёк"
+                return None, "❌ Промокод не найден или истёк"
             
             used = await conn.fetchrow(
                 'SELECT * FROM used_promocodes WHERE user_id = $1 AND promocode_id = $2',
                 user_id, promo['id']
             )
             if used:
-                return None, "Вы уже использовали этот промокод"
+                return None, "❌ Вы уже использовали этот промокод"
             
             await conn.execute(
                 'INSERT INTO used_promocodes (user_id, promocode_id) VALUES ($1, $2)',
@@ -528,22 +595,31 @@ class Database:
             return await conn.fetchrow('SELECT * FROM jackpot WHERE id = 1')
     
     async def add_to_jackpot(self, amount: int):
-        contribution = int(amount * 0.0001)  # 0.01%
-        if contribution > 0:
-            async with self.pool.acquire() as conn:
-                await conn.execute('UPDATE jackpot SET amount = amount + $1 WHERE id = 1', contribution)
+        contribution = max(int(amount * 0.0001), 1)
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                'UPDATE jackpot SET amount = amount + $1 WHERE id = 1', 
+                contribution
+            )
     
     async def register_for_jackpot(self, user_id: int):
         async with self.pool.acquire() as conn:
-            await conn.execute('UPDATE users SET jackpot_registered = TRUE WHERE user_id = $1', user_id)
+            await conn.execute(
+                'UPDATE users SET jackpot_registered = TRUE WHERE user_id = $1', 
+                user_id
+            )
     
     async def get_jackpot_participants(self):
         async with self.pool.acquire() as conn:
-            return await conn.fetch('SELECT * FROM users WHERE jackpot_registered = TRUE AND is_banned = FALSE')
+            return await conn.fetch(
+                'SELECT * FROM users WHERE jackpot_registered = TRUE AND is_banned = FALSE'
+            )
     
     async def get_jackpot_participants_count(self):
         async with self.pool.acquire() as conn:
-            return await conn.fetchval('SELECT COUNT(*) FROM users WHERE jackpot_registered = TRUE AND is_banned = FALSE')
+            return await conn.fetchval(
+                'SELECT COUNT(*) FROM users WHERE jackpot_registered = TRUE AND is_banned = FALSE'
+            )
     
     async def draw_jackpot(self):
         async with self.pool.acquire() as conn:
@@ -556,7 +632,8 @@ class Database:
             
             await self.update_balance(winner['user_id'], jackpot['amount'], add=True)
             await conn.execute('''
-                UPDATE jackpot SET amount = 1000000, last_winner = $1, last_draw = NOW() WHERE id = 1
+                UPDATE jackpot SET amount = 1000000, last_winner = $1, last_draw = NOW() 
+                WHERE id = 1
             ''', winner['user_id'])
             await conn.execute('UPDATE users SET jackpot_registered = FALSE')
             
@@ -574,16 +651,15 @@ class Database:
             ''')
     
     async def add_president_profit(self, amount: int):
-        profit = int(amount * 0.0001)  # 0.01%
-        if profit > 0:
-            async with self.pool.acquire() as conn:
-                president = await self.get_president()
-                if president:
-                    await conn.execute(
-                        'UPDATE president SET profit = profit + $1 WHERE id = $2',
-                        profit, president['id']
-                    )
-                    await self.update_balance(president['user_id'], profit, add=True)
+        profit = max(int(amount * 0.0001), 1)
+        async with self.pool.acquire() as conn:
+            president = await self.get_president()
+            if president:
+                await conn.execute(
+                    'UPDATE president SET profit = profit + $1 WHERE id = $2',
+                    profit, president['id']
+                )
+                await self.update_balance(president['user_id'], profit, add=True)
     
     async def place_president_bet(self, user_id: int, amount: int):
         async with self.pool.acquire() as conn:
@@ -627,7 +703,10 @@ class Database:
                 return None
             
             current_president = await self.get_president()
-            eligible_bets = [b for b in bets if not current_president or b['user_id'] != current_president['user_id']]
+            eligible_bets = [
+                b for b in bets 
+                if not current_president or b['user_id'] != current_president['user_id']
+            ]
             
             if not eligible_bets:
                 return None
@@ -635,7 +714,7 @@ class Database:
             total_bets = sum(b['bet_amount'] for b in eligible_bets)
             rand = random.uniform(0, total_bets)
             cumulative = 0
-            winner = None
+            winner = eligible_bets[-1]
             
             for bet in eligible_bets:
                 cumulative += bet['bet_amount']
@@ -643,26 +722,29 @@ class Database:
                     winner = bet
                     break
             
-            if not winner:
-                winner = eligible_bets[-1]
-            
-            # Возврат 50% проигравшим
             for bet in eligible_bets:
                 if bet['user_id'] != winner['user_id']:
                     refund = bet['bet_amount'] // 2
                     await self.update_balance(bet['user_id'], refund, add=True)
             
-            # Новый президент
             if current_president:
-                await conn.execute('UPDATE users SET is_president = FALSE WHERE user_id = $1', current_president['user_id'])
+                await conn.execute(
+                    'UPDATE users SET is_president = FALSE WHERE user_id = $1', 
+                    current_president['user_id']
+                )
             
-            await conn.execute('''
-                INSERT INTO president (user_id, profit) VALUES ($1, 0)
-            ''', winner['user_id'])
-            await conn.execute('UPDATE users SET is_president = TRUE WHERE user_id = $1', winner['user_id'])
+            await conn.execute(
+                'INSERT INTO president (user_id, profit) VALUES ($1, 0)',
+                winner['user_id']
+            )
+            await conn.execute(
+                'UPDATE users SET is_president = TRUE WHERE user_id = $1', 
+                winner['user_id']
+            )
             
-            # Очистка ставок
-            await conn.execute('DELETE FROM president_bets WHERE bet_date < CURRENT_DATE')
+            await conn.execute(
+                'DELETE FROM president_bets WHERE bet_date <= CURRENT_DATE'
+            )
             
             return winner
     
@@ -703,20 +785,25 @@ class Database:
     
     async def buy_business(self, user_id: int, business_id: int):
         async with self.pool.acquire() as conn:
-            business = await conn.fetchrow('SELECT * FROM businesses WHERE id = $1', business_id)
+            business = await conn.fetchrow(
+                'SELECT * FROM businesses WHERE id = $1', 
+                business_id
+            )
             if not business:
                 return None, "Бизнес не найден"
             
             user = await self.get_user(user_id)
             user_businesses = await self.get_user_businesses(user_id)
             
-            # Проверка уже купленного
-            existing = next((ub for ub in user_businesses if ub['business_id'] == business_id), None)
+            existing = next(
+                (ub for ub in user_businesses if ub['business_id'] == business_id), 
+                None
+            )
             if existing:
                 return None, "У вас уже есть этот бизнес"
             
             if len(user_businesses) >= user['business_slots']:
-                return None, f"У вас нет свободных слотов. Купите слот у администратора"
+                return None, "Нет свободных слотов"
             
             if user['balance'] < business['base_price']:
                 return None, "Недостаточно средств"
@@ -766,8 +853,7 @@ class Database:
                 return 0
             
             hours = (datetime.now() - ub['last_collect']).total_seconds() / 3600
-            profit = int(hours * ub['base_profit'] * float(ub['profit_multiplier']))
-            return profit
+            return int(hours * ub['base_profit'] * float(ub['profit_multiplier']))
     
     async def upgrade_business(self, user_id: int, user_business_id: int, cost: int):
         async with self.pool.acquire() as conn:
@@ -784,10 +870,11 @@ class Database:
             
             await self.update_balance(user_id, cost, add=False)
             new_multiplier = float(ub['profit_multiplier']) + 0.1
-            await conn.execute(
-                'UPDATE user_businesses SET profit_multiplier = $1, upgrade_level = upgrade_level + 1 WHERE id = $2',
-                new_multiplier, user_business_id
-            )
+            await conn.execute('''
+                UPDATE user_businesses 
+                SET profit_multiplier = $1, upgrade_level = upgrade_level + 1 
+                WHERE id = $2
+            ''', new_multiplier, user_business_id)
             return True
     
     async def sell_business(self, user_id: int, user_business_id: int):
@@ -804,8 +891,10 @@ class Database:
             
             sell_price = ub['base_price'] // 2
             await self.update_balance(user_id, sell_price, add=True)
-            await conn.execute('DELETE FROM user_businesses WHERE id = $1', user_business_id)
-            
+            await conn.execute(
+                'DELETE FROM user_businesses WHERE id = $1', 
+                user_business_id
+            )
             return sell_price
     
     async def pay_business_tax(self, user_id: int, user_business_id: int):
@@ -820,7 +909,7 @@ class Database:
             if not ub:
                 return 0, "Бизнес не найден"
             
-            tax = ub['base_price'] // 10  # 10% от стоимости в день
+            tax = ub['base_price'] // 10
             user = await self.get_user(user_id)
             
             if user['balance'] < tax:
@@ -828,7 +917,9 @@ class Database:
             
             await self.update_balance(user_id, tax, add=False)
             await conn.execute('''
-                UPDATE user_businesses SET tax_paid_until = tax_paid_until + INTERVAL '1 day' WHERE id = $1
+                UPDATE user_businesses 
+                SET tax_paid_until = tax_paid_until + INTERVAL '1 day' 
+                WHERE id = $1
             ''', user_business_id)
             
             return tax, None
@@ -851,7 +942,6 @@ class Database:
     
     async def generate_daily_tasks(self, user_id: int):
         async with self.pool.acquire() as conn:
-            # Проверяем есть ли задания на сегодня
             existing = await conn.fetch(
                 'SELECT * FROM daily_tasks WHERE user_id = $1 AND task_date = CURRENT_DATE',
                 user_id
@@ -860,19 +950,19 @@ class Database:
                 return existing
             
             task_types = [
-                ('labyrinth_play', 'Сыграть в игру «Лабиринт»'),
-                ('higher_lower_win', 'Выиграть в игре «Больше меньше»'),
-                ('knb_play', 'Сыграть в игру «КНБ»'),
-                ('crash_win', 'Выиграть в игре «Краш»'),
-                ('mines_play', 'Сыграть в игру «Мины»'),
-                ('diamonds_play', 'Сыграть в игру «Алмазы»'),
-                ('roulette_play', 'Сыграть в игру «Рулетка»'),
-                ('blackjack_play', 'Сыграть в игру «Блэкджек»'),
+                'labyrinth_play',
+                'higher_lower_win',
+                'knb_play',
+                'crash_win',
+                'mines_play',
+                'diamonds_play',
+                'roulette_play',
+                'blackjack_play',
             ]
             
             selected = random.sample(task_types, min(4, len(task_types)))
             
-            for task_type, _ in selected:
+            for task_type in selected:
                 target = random.randint(3, 20)
                 reward_vc = random.randint(500000, 1500000)
                 reward_vt = random.randint(1, 50)
@@ -891,19 +981,19 @@ class Database:
         async with self.pool.acquire() as conn:
             task = await conn.fetchrow('''
                 SELECT * FROM daily_tasks 
-                WHERE user_id = $1 AND task_type = $2 AND task_date = CURRENT_DATE AND is_completed = FALSE
+                WHERE user_id = $1 AND task_type = $2 
+                AND task_date = CURRENT_DATE AND is_completed = FALSE
             ''', user_id, task_type)
             
             if not task:
                 return None
             
             new_progress = task['task_progress'] + increment
-            await conn.execute('''
-                UPDATE daily_tasks SET task_progress = $1
-                WHERE id = $2
-            ''', new_progress, task['id'])
+            await conn.execute(
+                'UPDATE daily_tasks SET task_progress = $1 WHERE id = $2',
+                new_progress, task['id']
+            )
             
-            # Проверяем выполнение
             if new_progress >= task['task_target']:
                 await conn.execute(
                     'UPDATE daily_tasks SET is_completed = TRUE WHERE id = $1',
@@ -916,13 +1006,14 @@ class Database:
     
     async def reset_daily_tasks(self):
         async with self.pool.acquire() as conn:
-            await conn.execute('DELETE FROM daily_tasks WHERE task_date < CURRENT_DATE')
+            await conn.execute(
+                'DELETE FROM daily_tasks WHERE task_date < CURRENT_DATE'
+            )
     
     # ==================== GAMES ====================
     
     async def start_game(self, user_id: int, game_type: str, bet: int, game_data: dict):
         async with self.pool.acquire() as conn:
-            # Удаляем старую игру если есть
             await conn.execute(
                 'DELETE FROM active_games WHERE user_id = $1 AND game_type = $2',
                 user_id, game_type
@@ -939,7 +1030,10 @@ class Database:
                 user_id, game_type
             )
             if row:
-                return {**dict(row), 'game_data': json.loads(row['game_data'])}
+                data = dict(row)
+                if isinstance(data['game_data'], str):
+                    data['game_data'] = json.loads(data['game_data'])
+                return data
             return None
     
     async def update_game(self, user_id: int, game_type: str, game_data: dict):
@@ -970,7 +1064,7 @@ class Database:
                 return await conn.fetchrow('''
                     SELECT 
                         COUNT(*) as games,
-                        SUM(CASE WHEN win_amount > 0 THEN 1 ELSE 0 END) as wins,
+                        COALESCE(SUM(CASE WHEN win_amount > 0 THEN 1 ELSE 0 END), 0) as wins,
                         COALESCE(SUM(win_amount), 0) as total_won,
                         COALESCE(SUM(bet_amount), 0) as total_bet
                     FROM game_history
@@ -979,7 +1073,7 @@ class Database:
             return await conn.fetchrow('''
                 SELECT 
                     COUNT(*) as games,
-                    SUM(CASE WHEN win_amount > 0 THEN 1 ELSE 0 END) as wins,
+                    COALESCE(SUM(CASE WHEN win_amount > 0 THEN 1 ELSE 0 END), 0) as wins,
                     COALESCE(SUM(win_amount), 0) as total_won,
                     COALESCE(SUM(bet_amount), 0) as total_bet
                 FROM game_history
@@ -1011,7 +1105,6 @@ class Database:
     
     async def create_daily_bonus(self, amount: int, max_activations: int):
         async with self.pool.acquire() as conn:
-            # Проверяем, есть ли уже бонус на сегодня
             existing = await conn.fetchrow(
                 'SELECT * FROM daily_bonus WHERE bonus_date = CURRENT_DATE'
             )
@@ -1030,7 +1123,8 @@ class Database:
         async with self.pool.acquire() as conn:
             return await conn.fetchrow('''
                 SELECT * FROM daily_bonus 
-                WHERE bonus_date = CURRENT_DATE AND current_activations < max_activations
+                WHERE bonus_date = CURRENT_DATE 
+                AND current_activations < max_activations
                 ORDER BY id DESC LIMIT 1
             ''')
     
@@ -1059,10 +1153,12 @@ class Database:
             )
             await self.update_balance(user_id, bonus['bonus_amount'], add=True)
             
-            # Обновляем информацию о бонусе
-            updated_bonus = await conn.fetchrow('SELECT * FROM daily_bonus WHERE id = $1', bonus['id'])
+            updated_bonus = await conn.fetchrow(
+                'SELECT * FROM daily_bonus WHERE id = $1', 
+                bonus['id']
+            )
             return updated_bonus, None
 
 
-# Создаём глобальный экземпляр
+# Глобальный экземпляр
 db = Database()
