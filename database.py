@@ -96,7 +96,7 @@ class Database:
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS used_promocodes (
                     id SERIAL PRIMARY KEY,
-                    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
                     promocode_id INT REFERENCES promocodes(id) ON DELETE CASCADE,
                     used_at TIMESTAMP DEFAULT NOW(),
                     UNIQUE(user_id, promocode_id)
