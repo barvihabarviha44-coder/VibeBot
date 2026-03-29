@@ -11,7 +11,7 @@ CHAT_ID = "@chatvibee_bet"
 CHANNEL_LINK = "https://t.me/nvibee_bet"
 CHAT_LINK = "https://t.me/chatvibee_bet"
 
-ADMIN_IDS = [575621653]  # Добавьте свой ID
+ADMIN_IDS = [1997428703]  # Добавьте свой ID
 ADMIN_USERNAME = "@d066q"
 
 # Эмодзи Premium
