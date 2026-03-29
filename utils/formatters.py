@@ -1,5 +1,8 @@
-def format_number(num: int | float) -> str:
-    """Форматирование чисел в к, кк, ккк и т.д."""
+import re
+
+
+def format_number(num) -> str:
+    """Форматирование чисел в к, кк, ккк"""
     if num is None:
         return "0"
     
@@ -8,21 +11,41 @@ def format_number(num: int | float) -> str:
     if abs(num) < 1000:
         return str(int(num))
     
-    suffixes = ['', 'к', 'кк', 'ккк', 'кккк', 'ккккк']
+    suffixes = ['', 'к', 'кк', 'ккк', 'кккк']
     magnitude = 0
     
-    original = num
     while abs(num) >= 1000 and magnitude < len(suffixes) - 1:
         magnitude += 1
         num /= 1000.0
     
-    # Форматируем с нужной точностью
     if num == int(num):
         return f"{int(num)}{suffixes[magnitude]}"
-    elif abs(original) >= 100000000:  # 100кк+
-        return f"{num:.1f}{suffixes[magnitude]}"
     else:
-        return f"{num:.2f}{suffixes[magnitude]}"
+        return f"{num:.2f}{suffixes[magnitude]}".rstrip('0').rstrip('.')
+
+
+def parse_bet(text: str) -> int:
+    """Парсинг ставки из текста: 1к, 1.5к, 1кк, 1.5кк и т.д."""
+    text = text.lower().strip().replace(' ', '').replace(',', '.')
+    
+    # Паттерн для чисел с суффиксами
+    match = re.match(r'^(\d+\.?\d*)(к+|кк+|ккк+)?$', text)
+    
+    if not match:
+        # Пробуем просто число
+        try:
+            return int(float(text))
+        except:
+            return 0
+    
+    number = float(match.group(1))
+    suffix = match.group(2) or ''
+    
+    # Считаем множитель по количеству 'к'
+    multiplier = 1000 ** len(suffix) if suffix else 1
+    
+    result = int(number * multiplier)
+    return result
 
 
 def format_time(seconds: int) -> str:
@@ -53,27 +76,3 @@ def create_progress_bar(current: int, total: int, length: int = 10) -> str:
     filled = int(length * min(current, total) / total)
     empty = length - filled
     return "▓" * filled + "░" * empty
-
-
-def parse_amount(text: str) -> int:
-    """Парсинг суммы из текста (100к -> 100000)"""
-    text = text.lower().strip()
-    
-    multipliers = {
-        'к': 1000,
-        'кк': 1000000,
-        'ккк': 1000000000,
-        'кккк': 1000000000000,
-    }
-    
-    for suffix, mult in sorted(multipliers.items(), key=lambda x: -len(x[0])):
-        if text.endswith(suffix):
-            try:
-                return int(float(text[:-len(suffix)]) * mult)
-            except:
-                pass
-    
-    try:
-        return int(float(text))
-    except:
-        return 0
