@@ -1,65 +1,52 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from config import EMOJI
-from keyboards.inline import get_back_button
+from aiogram.types import Message
 
 router = Router()
 
 
-@router.message(F.text.lower().in_(['помощь', 'команды', 'help']))
+@router.message(F.text.lower().in_(['помощь', 'команды', 'help', '?']))
 async def help_command(message: Message):
-    await show_help(message)
+    text = """
+❓ <b>Все команды VibeBet</b>
 
+👤 <b>Профиль и бонусы:</b>
+<code>профиль</code> / <code>я</code> — профиль
+<code>бонус</code> — ежедневный бонус (500к VC)
+<code>час</code> — ежечасный бонус (10-150к VC)
+<code>+реп</code> — +1 реп (ответом)
+<code>-реп</code> — -2 реп (ответом)
 
-@router.callback_query(F.data == "menu_help")
-async def help_callback(callback: CallbackQuery):
-    await show_help(callback, edit=True)
-
-
-async def show_help(target, edit: bool = False):
-    text = f"""
-{EMOJI['help']} <b>Центр помощи VibeBet</b>
-
-{EMOJI['user']} <b>Профиль:</b>
-<code>я</code>, <code>б</code>, <code>проф</code>, <code>профиль</code>, <code>п</code>
-
-{EMOJI['slot']} <b>Игры:</b>
-<code>мины [ставка] [мины 1-6]</code>
-<code>алмазы [ставка]</code>
-<code>краш [ставка]</code>
-<code>рулетка [ставка]</code>
-<code>кости [ставка]</code>
-<code>футбол [ставка]</code>
-<code>баскетбол [ставка]</code>
-<code>боулинг [ставка]</code>
-<code>дартс [ставка]</code>
-<code>блэкджек [ставка]</code>
+🎮 <b>Игры:</b>
+<code>мины [ставка] [мины]</code> / <code>мн</code>
+<code>алмазы [ставка]</code> / <code>ал</code>
+<code>краш [ставка]</code> / <code>крш</code>
+<code>рулетка [ставка] [выбор]</code> / <code>рл</code>
+<code>кости [ставка]</code> / <code>кс</code>
+<code>футбол [ставка]</code> / <code>фб</code>
+<code>баскетбол [ставка]</code> / <code>бс</code>
+<code>дартс [ставка]</code> / <code>др</code>
+<code>боулинг [ставка]</code> / <code>бл</code>
+<code>блэкджек [ставка]</code> / <code>бд</code>
 <code>кнб [ставка]</code>
-<code>лабиринт [ставка]</code>
-<code>больше [ставка]</code>
+<code>лабиринт [ставка]</code> / <code>лб</code>
+<code>больше [ставка]</code> / <code>бм</code>
 
-{EMOJI['work']} <b>Работа:</b>
-<code>работа</code> - список работ
+💼 <b>Экономика:</b>
+<code>работа</code> / <code>раб</code>
+<code>ферма</code>
+<code>банк</code>
+<code>рынок</code>
+<code>бизнес</code>
 
-{EMOJI['farm']} <b>Ферма:</b>
-<code>ферма</code> - управление фермой VT
+📋 <b>Другое:</b>
+<code>задания</code>
+<code>топ</code>
+<code>джекпот</code>
+<code>президент</code>
+<code>промокод [код]</code>
+<code>перевод [ID] [сумма]</code>
 
-{EMOJI['bank']} <b>Банк:</b>
-<code>банк</code> - депозиты и переводы
-<code>перевод [ID] [сумма]</code> - быстрый перевод
-
-{EMOJI['market']} <b>Рынок:</b>
-<code>рынок</code> - торговля VibeTon
-
-{EMOJI['gift']} <b>Промокоды:</b>
-<code>промокод [код]</code> - активировать промокод
-
-{EMOJI['info']} <b>Форматы сумм:</b>
-<code>100к</code> = 100,000
-<code>1кк</code> = 1,000,000
+💡 <b>Поддержка сумм:</b>
+<code>1к</code>, <code>1.5к</code>, <code>2кк</code>, <code>all</code>, <code>все</code>, <code>пол</code>, <code>половина</code>
 """
-    
-    if edit:
-        await target.message.edit_text(text, reply_markup=get_back_button(), parse_mode="HTML")
-    else:
-        await target.answer(text, reply_markup=get_back_button(), parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML")
