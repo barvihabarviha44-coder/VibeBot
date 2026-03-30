@@ -2,8 +2,8 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from database import db
-from config import ADMIN_IDS, EMOJI, CHAT_ID
-from utils.formatters import format_number
+from config import ADMIN_IDS, EMOJI, CHANNEL_ID
+from utils.formatters import format_number, parse_amount_special
 import random
 
 router = Router()
@@ -37,7 +37,7 @@ async def admin_panel(message: Message):
 <b>Принудительный запуск:</b>
 /forcejackpot — розыгрыш джекпота
 /forcepresident — выборы президента
-/forcebonus — отправить бонус
+/forcebonus — отправить бонус в канал
 """
     await message.answer(text, parse_mode="HTML")
 
@@ -46,12 +46,10 @@ async def admin_panel(message: Message):
 async def ban_user(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     args = message.text.split()
     if len(args) < 2:
         await message.answer("❌ /ban [ID]")
         return
-    
     try:
         user_id = int(args[1])
         await db.ban_user(user_id, True)
@@ -64,12 +62,10 @@ async def ban_user(message: Message):
 async def unban_user(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     args = message.text.split()
     if len(args) < 2:
         await message.answer("❌ /unban [ID]")
         return
-    
     try:
         user_id = int(args[1])
         await db.ban_user(user_id, False)
@@ -82,16 +78,14 @@ async def unban_user(message: Message):
 async def give_vc(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     args = message.text.split()
     if len(args) < 3:
         await message.answer("❌ /give [ID] [сумма]")
         return
-    
     try:
-        from utils.formatters import parse_bet
         user_id = int(args[1])
-        amount = parse_bet(args[2])
+        # Для админов текущий баланс не важен в выдаче, ставим 0
+        amount = parse_amount_special(args[2], 0)
         
         target_user = await db.get_user(user_id)
         if not target_user:
@@ -108,21 +102,17 @@ async def give_vc(message: Message):
 async def give_vt(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     args = message.text.split()
     if len(args) < 3:
         await message.answer("❌ /givevt [ID] [сумма]")
         return
-    
     try:
         user_id = int(args[1])
         amount = float(args[2])
-        
         target_user = await db.get_user(user_id)
         if not target_user:
             await message.answer("❌ Пользователь не найден!")
             return
-        
         await db.update_vt_balance(user_id, amount, add=True)
         await message.answer(f"✅ Выдано {amount} VT пользователю {user_id}!")
     except:
@@ -133,16 +123,13 @@ async def give_vt(message: Message):
 async def user_info(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     args = message.text.split()
     if len(args) < 2:
         await message.answer("❌ /userinfo [ID]")
         return
-    
     try:
         user_id = int(args[1])
         user = await db.get_user(user_id)
-        
         if not user:
             await message.answer("❌ Пользователь не найден!")
             return
@@ -168,23 +155,18 @@ VT: {float(user['vt_balance']):.2f}
 async def create_promo(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     args = message.text.split()
     if len(args) < 5:
         await message.answer("❌ /promo [код] [vc/vt] [сумма] [макс]")
         return
-    
     try:
-        from utils.formatters import parse_bet
         code = args[1].upper()
         reward_type = args[2].lower()
-        amount = parse_bet(args[3])
+        amount = parse_amount_special(args[3], 0)
         max_uses = int(args[4])
-        
         if reward_type not in ['vc', 'vt']:
             await message.answer("❌ Тип: vc или vt")
             return
-        
         await db.create_promocode(code, reward_type, amount, max_uses)
         await message.answer(f"✅ Промокод <code>{code}</code> создан!\n💰 {format_number(amount)} {reward_type.upper()}\n👥 Макс: {max_uses}", parse_mode="HTML")
     except Exception as e:
@@ -195,18 +177,14 @@ async def create_promo(message: Message):
 async def add_business(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     args = message.text.split()
     if len(args) < 4:
         await message.answer("❌ /addbiz [название] [цена] [прибыль]")
         return
-    
     try:
-        from utils.formatters import parse_bet
         name = args[1]
-        price = parse_bet(args[2])
-        profit = parse_bet(args[3])
-        
+        price = parse_amount_special(args[2], 0)
+        profit = parse_amount_special(args[3], 0)
         await db.add_business(name, price, profit)
         await message.answer(f"✅ Бизнес «{name}» добавлен!\n💰 Цена: {format_number(price)} VC\n📈 Прибыль: {format_number(profit)} VC/час", parse_mode="HTML")
     except Exception as e:
@@ -217,12 +195,10 @@ async def add_business(message: Message):
 async def add_slot(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     args = message.text.split()
     if len(args) < 2:
         await message.answer("❌ /addslot [ID]")
         return
-    
     try:
         user_id = int(args[1])
         await db.add_business_slot(user_id)
@@ -235,15 +211,12 @@ async def add_slot(message: Message):
 async def broadcast(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     text = message.text.replace("/broadcast", "").strip()
     if not text:
         await message.answer("❌ /broadcast [текст]")
         return
-    
     async with db.pool.acquire() as conn:
         users = await conn.fetch("SELECT user_id FROM users WHERE is_banned = FALSE")
-    
     sent = 0
     for user in users:
         try:
@@ -251,37 +224,24 @@ async def broadcast(message: Message):
             sent += 1
         except:
             pass
-    
     await message.answer(f"✅ Отправлено: {sent}")
 
-
-# ==================== ПРИНУДИТЕЛЬНЫЙ ЗАПУСК ====================
 
 @router.message(Command("forcejackpot"))
 async def force_jackpot(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     result = await db.draw_jackpot()
-    
     if not result:
         await message.answer("❌ Нет участников джекпота!")
         return
-    
     winner, amount = result
-    
     try:
         await message.bot.send_message(
-            CHAT_ID,
-            f"""
-{EMOJI['jackpot']} <b>ДЖЕКПОТ СОРВАН!</b>
-
-👤 Победитель: <b>{winner['first_name']}</b>
-💰 Выигрыш: <b>{format_number(amount)} VC</b>
-""",
+            CHANNEL_ID,
+            f"🎰 <b>ДЖЕКПОТ СОРВАН!</b>\n\n👤 Победитель: <b>{winner['first_name']}</b>\n💰 Выигрыш: <b>{format_number(amount)} VC</b>",
             parse_mode="HTML"
         )
-        
         await message.bot.send_message(
             winner['user_id'],
             f"🎉 Вы выиграли ДжекПот! +{format_number(amount)} VC",
@@ -289,60 +249,41 @@ async def force_jackpot(message: Message):
         )
     except:
         pass
-    
-    await message.answer(f"✅ Джекпот разыгран!\nПобедитель: {winner['first_name']} ({winner['user_id']})\nСумма: {format_number(amount)} VC")
+    await message.answer(f"✅ Джекпот разыгран!\nПобедитель: {winner['first_name']}\nСумма: {format_number(amount)} VC")
 
 
 @router.message(Command("forcepresident"))
 async def force_president(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     winner = await db.elect_president()
-    
     if not winner:
         await message.answer("❌ Нет ставок на президента!")
         return
-    
     try:
         await message.bot.send_message(
-            CHAT_ID,
-            f"""
-{EMOJI['president']} <b>НОВЫЙ ПРЕЗИДЕНТ!</b>
-
-👤 <b>{winner['first_name']}</b>
-💰 Ставка: <b>{format_number(winner['bet_amount'])} VC</b>
-""",
+            CHANNEL_ID,
+            f"👨‍💼 <b>НОВЫЙ ПРЕЗИДЕНТ!</b>\n\n👤 <b>{winner['first_name']}</b>\n💰 Ставка: <b>{format_number(winner['bet_amount'])} VC</b>",
             parse_mode="HTML"
         )
     except:
         pass
-    
-    await message.answer(f"✅ Президент избран!\n{winner['first_name']} ({winner['user_id']})")
+    await message.answer(f"✅ Президент избран!\n{winner['first_name']}")
 
 
 @router.message(Command("forcebonus"))
 async def force_bonus(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     bonus_amount = 15000000
     max_activations = random.randint(50, 500)
-    
     await db.create_daily_bonus(bonus_amount, max_activations)
-    
     try:
         await message.bot.send_message(
-            CHAT_ID,
-            f"""
-{EMOJI['gift']} <b>Бонус {format_number(bonus_amount)} VC</b>
-
-🎁 Активаций: <b>{max_activations}</b>
-
-🆘 Напишите: <b>Бонус</b>
-""",
+            CHANNEL_ID,
+            f"🎁 <b>Бонус {format_number(bonus_amount)} VC</b>\n\n🎁 Активаций: <b>{max_activations}</b>\n\n🆘 Напишите в чате: <b>Бонус</b>",
             parse_mode="HTML"
         )
-        await message.answer(f"✅ Бонус отправлен в чат!\n{format_number(bonus_amount)} VC, {max_activations} активаций")
+        await message.answer(f"✅ Бонус отправлен в канал!")
     except Exception as e:
-        await message.answer(f"❌ Ошибка отправки: {e}\n\nПроверьте:\n1. Бот добавлен в чат {CHAT_ID}\n2. Бот админ чата")
+        await message.answer(f"❌ Ошибка отправки: {e}")
